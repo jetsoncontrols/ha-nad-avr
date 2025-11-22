@@ -1,4 +1,5 @@
 """The NAD AVR integration."""
+
 import logging
 
 from homeassistant.config_entries import ConfigEntry
@@ -17,20 +18,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up NAD AVR from a config entry."""
     host = entry.data[CONF_HOST]
     port = entry.data[CONF_PORT]
-    
-    # Create client
+
+    # Create client (don't connect yet - wait for callbacks to be set up)
     client = NADClient(host, port)
-    
+
     # Store client in hass.data
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = client
-    
-    # Connect to the AVR
-    await client.connect()
-    
+
     # Forward the setup to the media_player platform
+    # The media_player entity will set up callbacks and then connect
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-    
+
     return True
 
 
@@ -38,12 +37,12 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     # Unload platforms
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-    
+
     if unload_ok:
         # Disconnect and remove client
         client = hass.data[DOMAIN].pop(entry.entry_id)
         await client.disconnect()
-    
+
     return unload_ok
 
 

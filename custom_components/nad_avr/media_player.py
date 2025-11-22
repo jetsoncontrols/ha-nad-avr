@@ -1,4 +1,5 @@
 """Media player platform for NAD AVR."""
+
 import logging
 from typing import Any
 
@@ -10,24 +11,25 @@ from homeassistant.components.media_player import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, CONF_NAME
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
-    DOMAIN,
-    CMD_POWER_ON,
+    CMD_MUTE_OFF,
+    CMD_MUTE_ON,
+    CMD_MUTE_QUERY,
     CMD_POWER_OFF,
+    CMD_POWER_ON,
     CMD_POWER_QUERY,
-    CMD_VOLUME_UP,
+    CMD_SOURCE_QUERY,
+    CMD_SOURCE_SET,
     CMD_VOLUME_DOWN,
     CMD_VOLUME_QUERY,
     CMD_VOLUME_SET,
-    CMD_MUTE_ON,
-    CMD_MUTE_OFF,
-    CMD_MUTE_QUERY,
-    CMD_SOURCE_QUERY,
-    CMD_SOURCE_SET,
-    SOURCES,
+    CMD_VOLUME_UP,
+    DOMAIN,
     SOURCE_NAMES,
+    SOURCES,
     VOLUME_MIN_DB,
     VOLUME_RANGE_DB,
 )
@@ -45,8 +47,10 @@ async def async_setup_entry(
     client = hass.data[DOMAIN][config_entry.entry_id]
     name = config_entry.data.get(CONF_NAME, f"NAD AVR {config_entry.data[CONF_HOST]}")
     host = config_entry.data[CONF_HOST]
-    
-    async_add_entities([NADAVRMediaPlayer(client, name, host, config_entry.entry_id)], True)
+
+    async_add_entities(
+        [NADAVRMediaPlayer(client, name, host, config_entry.entry_id)], True
+    )
 
 
 class NADAVRMediaPlayer(MediaPlayerEntity):
@@ -76,10 +80,16 @@ class NADAVRMediaPlayer(MediaPlayerEntity):
         self._attr_volume_level = 0.0
         self._attr_source = None
         self._attr_source_list = list(SOURCES.values())
-        
+
         # Set up callbacks
-        client._status_callback = self._connection_status_changed
-        client._update_callback = self._handle_update
+        client.status_callback = self._connection_status_changed
+        client.update_callback = self._handle_update
+
+    async def async_added_to_hass(self) -> None:
+        """Handle entity being added to Home Assistant."""
+        await super().async_added_to_hass()
+        # Now that the entity is added and callbacks are set up, connect to the device
+        await self._client.connect()
 
     @property
     def device_info(self) -> dict[str, Any]:
@@ -91,11 +101,11 @@ class NADAVRMediaPlayer(MediaPlayerEntity):
             "model": self._client.model or "AVR",
             "configuration_url": f"http://{self._host}/osd/",
         }
-        
+
         # Add firmware version if available
         if self._client.firmware_version:
             info["sw_version"] = self._client.firmware_version
-        
+
         return info
 
     async def _connection_status_changed(self, connected: bool) -> None:
@@ -107,31 +117,37 @@ class NADAVRMediaPlayer(MediaPlayerEntity):
         else:
             # Poll device info (model and firmware version)
             await self._client.poll_device_info()
-            
+
+            # Update device registry with polled info
+            device_reg = dr.async_get(self.hass)
+            device = device_reg.async_get_device(identifiers={(DOMAIN, self._entry_id)})
+            if device:
+                device_reg.async_update_device(
+                    device.id,
+                    model=self._client.model,
+                    sw_version=self._client.firmware_version,
+                )
+
             # Poll source names from the device
             await self._client.poll_source_names()
             self._update_source_list()
-            _LOGGER.info("Source list after polling: %s", self._attr_source_list)
-            
+
             # Write state after updating source list
             self.async_write_ha_state()
-            
+
             # Poll initial state (power, volume, mute, source)
             await self.async_update()
 
     def _update_source_list(self) -> None:
         """Update the source list with polled names, filtering out disabled sources."""
-        _LOGGER.info("Updating source list. Enabled: %s, Names: %s", 
-                     self._client.source_enabled, self._client.source_names)
-        
         if self._client.source_enabled:
             # Only include sources that are enabled
             enabled_sources = [
-                source_id for source_id in sorted(self._client.source_enabled.keys())
+                source_id
+                for source_id in sorted(self._client.source_enabled.keys())
                 if self._client.source_enabled.get(source_id, False)
             ]
-            _LOGGER.info("Enabled source IDs: %s", enabled_sources)
-            
+
             # Use polled names for enabled sources
             self._attr_source_list = []
             for source_id in enabled_sources:
@@ -140,54 +156,51 @@ class NADAVRMediaPlayer(MediaPlayerEntity):
                 if not source_name:
                     source_name = SOURCES.get(source_id, f"Source {source_id}")
                 self._attr_source_list.append(source_name)
-                _LOGGER.info("Added source %s with name: %s", source_id, source_name)
-            
-            _LOGGER.info("Final source list: %s", self._attr_source_list)
         elif self._client.source_names:
             # If no enabled info but we have names, use all sources with names
             self._attr_source_list = list(self._client.source_names.values())
-            _LOGGER.info("Source list updated with all named sources: %s", self._attr_source_list)
         else:
             # Use default names if polling failed
             self._attr_source_list = list(SOURCES.values())
-            _LOGGER.info("Source list updated with defaults: %s", self._attr_source_list)
 
     async def _handle_update(self, message: str) -> None:
         """Handle unsolicited updates from the device."""
         if not message or "=" not in message:
             return
-        
+
         try:
             key, value = message.split("=", 1)
             key = key.strip()
             value = value.strip()
-            
+
             # Handle power state updates
             if key == "Main.Power":
                 if value.lower() == "on":
                     self._attr_state = MediaPlayerState.ON
                 else:
                     self._attr_state = MediaPlayerState.OFF
-            
+
             # Handle volume updates
             elif key == "Main.Volume":
                 try:
                     volume_db = int(value)
-                    self._attr_volume_level = max(0.0, min(1.0, (volume_db - VOLUME_MIN_DB) / VOLUME_RANGE_DB))
+                    self._attr_volume_level = max(
+                        0.0, min(1.0, (volume_db - VOLUME_MIN_DB) / VOLUME_RANGE_DB)
+                    )
                 except ValueError:
                     pass
-            
+
             # Handle mute updates
             elif key == "Main.Mute":
                 self._attr_is_volume_muted = value.lower() == "on"
-            
+
             # Handle source updates
             elif key == "Main.Source":
                 # Use polled name if available, otherwise use default
                 self._attr_source = self._client.source_names.get(
                     value, SOURCES.get(value, value)
                 )
-            
+
             # Handle source enabled status updates
             elif key.startswith("Source") and key.endswith(".Enabled"):
                 # Extract source number from key (e.g., "Source1.Enabled" -> "1")
@@ -195,12 +208,13 @@ class NADAVRMediaPlayer(MediaPlayerEntity):
                     source_num = key.replace("Source", "").replace(".Enabled", "")
                     is_enabled = value.lower() in ["yes", "on", "true", "1"]
                     self._client.source_enabled[source_num] = is_enabled
-                    _LOGGER.info("Source %s enabled status updated to: %s", source_num, is_enabled)
                     # Update the source list when enabled status changes
                     self._update_source_list()
                 except (ValueError, IndexError):
-                    _LOGGER.debug("Could not parse source enabled update: %s=%s", key, value)
-            
+                    _LOGGER.debug(
+                        "Could not parse source enabled update: %s=%s", key, value
+                    )
+
             # Handle source name updates
             elif key.startswith("Source") and key.endswith(".Name"):
                 # Extract source number from key (e.g., "Source1.Name" -> "1")
@@ -208,16 +222,17 @@ class NADAVRMediaPlayer(MediaPlayerEntity):
                     source_num = key.replace("Source", "").replace(".Name", "")
                     if value:
                         self._client.source_names[source_num] = value
-                        _LOGGER.info("Source %s name updated to: %s", source_num, value)
                         # Update the source list when name changes
                         self._update_source_list()
                 except (ValueError, IndexError):
-                    _LOGGER.debug("Could not parse source name update: %s=%s", key, value)
-            
+                    _LOGGER.debug(
+                        "Could not parse source name update: %s=%s", key, value
+                    )
+
             # Update the state in Home Assistant
             self.async_write_ha_state()
-            
-        except Exception as err:
+
+        except (ValueError, KeyError, AttributeError) as err:
             _LOGGER.debug("Error parsing update message '%s': %s", message, err)
 
     async def async_update(self) -> None:
@@ -226,9 +241,9 @@ class NADAVRMediaPlayer(MediaPlayerEntity):
             self._attr_available = False
             self._attr_state = MediaPlayerState.OFF
             return
-        
+
         self._attr_available = True
-        
+
         # Query power state
         response = await self._client.query(CMD_POWER_QUERY)
         if response and "=" in response:
@@ -237,7 +252,7 @@ class NADAVRMediaPlayer(MediaPlayerEntity):
                 self._attr_state = MediaPlayerState.ON
             else:
                 self._attr_state = MediaPlayerState.OFF
-        
+
         if self._attr_state == MediaPlayerState.ON:
             # Query volume
             response = await self._client.query(CMD_VOLUME_QUERY)
@@ -245,16 +260,18 @@ class NADAVRMediaPlayer(MediaPlayerEntity):
                 try:
                     volume_db = int(response.split("=", 1)[1].strip())
                     # Convert to 0.0-1.0 range
-                    self._attr_volume_level = max(0.0, min(1.0, (volume_db - VOLUME_MIN_DB) / VOLUME_RANGE_DB))
+                    self._attr_volume_level = max(
+                        0.0, min(1.0, (volume_db - VOLUME_MIN_DB) / VOLUME_RANGE_DB)
+                    )
                 except (ValueError, IndexError):
                     pass
-            
+
             # Query mute state
             response = await self._client.query(CMD_MUTE_QUERY)
             if response and "=" in response:
                 value = response.split("=", 1)[1].strip()
                 self._attr_is_volume_muted = value.lower() == "on"
-            
+
             # Query source
             response = await self._client.query(CMD_SOURCE_QUERY)
             if response and "=" in response:
@@ -305,17 +322,17 @@ class NADAVRMediaPlayer(MediaPlayerEntity):
         """Select input source."""
         # Find source ID by matching against polled names or defaults
         source_id = None
-        
+
         # Check polled names first
         for sid, name in self._client.source_names.items():
             if name == source:
                 source_id = sid
                 break
-        
+
         # Fall back to default names
         if not source_id:
             source_id = SOURCE_NAMES.get(source)
-        
+
         if source_id:
             await self._client.send_command(CMD_SOURCE_SET.format(source_id))
             self._attr_source = source
