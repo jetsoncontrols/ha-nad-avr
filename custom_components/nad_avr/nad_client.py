@@ -188,6 +188,7 @@ class NADClient:
 
     async def poll_source_names(self, source_count: int = 9) -> dict[str, str]:
         """Poll source names and enabled status from the device."""
+        _LOGGER.info("Starting to poll %d sources for names and enabled status", source_count)
         source_names = {}
         source_enabled = {}
         
@@ -204,9 +205,11 @@ class NADClient:
                     enabled_value = enabled_response.split("=", 1)[1].strip().lower()
                     is_enabled = enabled_value in ["yes", "on", "true", "1"]
                     source_enabled[source_id] = is_enabled
-                    _LOGGER.debug("Source %s enabled: %s", source_num, is_enabled)
+                    _LOGGER.info("Source %s enabled: %s (response: %s)", source_num, is_enabled, enabled_response)
                 except (ValueError, IndexError):
-                    _LOGGER.debug("Could not parse source enabled from: %s", enabled_response)
+                    _LOGGER.warning("Could not parse source enabled from: %s", enabled_response)
+            else:
+                _LOGGER.warning("No response for Source%s.Enabled query", source_num)
             
             # Only query name if source is enabled
             if is_enabled:
@@ -218,12 +221,15 @@ class NADClient:
                         name = name_response.split("=", 1)[1].strip()
                         if name:
                             source_names[source_id] = name
-                            _LOGGER.debug("Source %s name: %s", source_num, name)
+                            _LOGGER.info("Source %s name: %s", source_num, name)
                     except (ValueError, IndexError):
-                        _LOGGER.debug("Could not parse source name from: %s", name_response)
+                        _LOGGER.warning("Could not parse source name from: %s", name_response)
+                else:
+                    _LOGGER.warning("No response for Source%s.Name query", source_num)
         
         self.source_names = source_names
         self.source_enabled = source_enabled
+        _LOGGER.info("Source polling complete. Enabled: %s, Names: %s", source_enabled, source_names)
         return source_names
 
     async def send_command(self, command: str) -> bool:

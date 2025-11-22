@@ -103,6 +103,7 @@ class NADAVRMediaPlayer(MediaPlayerEntity):
         self._attr_available = connected
         if not connected:
             self._attr_state = MediaPlayerState.OFF
+            self.async_write_ha_state()
         else:
             # Poll device info (model and firmware version)
             await self._client.poll_device_info()
@@ -110,13 +111,19 @@ class NADAVRMediaPlayer(MediaPlayerEntity):
             # Poll source names from the device
             await self._client.poll_source_names()
             self._update_source_list()
+            _LOGGER.info("Source list after polling: %s", self._attr_source_list)
+            
+            # Write state after updating source list
+            self.async_write_ha_state()
             
             # Poll initial state (power, volume, mute, source)
             await self.async_update()
-        self.async_write_ha_state()
 
     def _update_source_list(self) -> None:
         """Update the source list with polled names, filtering out disabled sources."""
+        _LOGGER.debug("Updating source list. Enabled: %s, Names: %s", 
+                     self._client.source_enabled, self._client.source_names)
+        
         if self._client.source_enabled:
             # Only include sources that are enabled
             self._attr_source_list = [
@@ -124,15 +131,18 @@ class NADAVRMediaPlayer(MediaPlayerEntity):
                 for source_id in sorted(SOURCES.keys())
                 if self._client.source_enabled.get(source_id, False)
             ]
+            _LOGGER.info("Source list updated with enabled sources: %s", self._attr_source_list)
         elif self._client.source_names:
             # If no enabled info but we have names, use all sources with names
             self._attr_source_list = [
                 self._client.source_names.get(source_id, SOURCES.get(source_id, f"Source {source_id}"))
                 for source_id in sorted(SOURCES.keys())
             ]
+            _LOGGER.info("Source list updated with all named sources: %s", self._attr_source_list)
         else:
             # Use default names if polling failed
             self._attr_source_list = list(SOURCES.values())
+            _LOGGER.info("Source list updated with defaults: %s", self._attr_source_list)
 
     async def _handle_update(self, message: str) -> None:
         """Handle unsolicited updates from the device."""
@@ -169,6 +179,32 @@ class NADAVRMediaPlayer(MediaPlayerEntity):
                 self._attr_source = self._client.source_names.get(
                     value, SOURCES.get(value, value)
                 )
+            
+            # Handle source enabled status updates
+            elif key.startswith("Source") and key.endswith(".Enabled"):
+                # Extract source number from key (e.g., "Source1.Enabled" -> "1")
+                try:
+                    source_num = key.replace("Source", "").replace(".Enabled", "")
+                    is_enabled = value.lower() in ["yes", "on", "true", "1"]
+                    self._client.source_enabled[source_num] = is_enabled
+                    _LOGGER.info("Source %s enabled status updated to: %s", source_num, is_enabled)
+                    # Update the source list when enabled status changes
+                    self._update_source_list()
+                except (ValueError, IndexError):
+                    _LOGGER.debug("Could not parse source enabled update: %s=%s", key, value)
+            
+            # Handle source name updates
+            elif key.startswith("Source") and key.endswith(".Name"):
+                # Extract source number from key (e.g., "Source1.Name" -> "1")
+                try:
+                    source_num = key.replace("Source", "").replace(".Name", "")
+                    if value:
+                        self._client.source_names[source_num] = value
+                        _LOGGER.info("Source %s name updated to: %s", source_num, value)
+                        # Update the source list when name changes
+                        self._update_source_list()
+                except (ValueError, IndexError):
+                    _LOGGER.debug("Could not parse source name update: %s=%s", key, value)
             
             # Update the state in Home Assistant
             self.async_write_ha_state()
