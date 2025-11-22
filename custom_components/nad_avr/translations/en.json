@@ -1,0 +1,22 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "NAD AVR Setup",
+        "description": "Enter the connection details for your NAD AVR.",
+        "data": {
+          "host": "Host",
+          "port": "Port",
+          "name": "Name"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to NAD AVR. Please check the host and port.",
+      "unknown": "Unexpected error occurred."
+    },
+    "abort": {
+      "already_configured": "This NAD AVR is already configured."
+    }
+  }
+}
