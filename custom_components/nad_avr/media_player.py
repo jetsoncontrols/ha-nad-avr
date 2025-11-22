@@ -121,23 +121,31 @@ class NADAVRMediaPlayer(MediaPlayerEntity):
 
     def _update_source_list(self) -> None:
         """Update the source list with polled names, filtering out disabled sources."""
-        _LOGGER.debug("Updating source list. Enabled: %s, Names: %s", 
+        _LOGGER.info("Updating source list. Enabled: %s, Names: %s", 
                      self._client.source_enabled, self._client.source_names)
         
         if self._client.source_enabled:
             # Only include sources that are enabled
-            self._attr_source_list = [
-                self._client.source_names.get(source_id, SOURCES.get(source_id, f"Source {source_id}"))
-                for source_id in sorted(SOURCES.keys())
+            enabled_sources = [
+                source_id for source_id in sorted(self._client.source_enabled.keys())
                 if self._client.source_enabled.get(source_id, False)
             ]
-            _LOGGER.info("Source list updated with enabled sources: %s", self._attr_source_list)
+            _LOGGER.info("Enabled source IDs: %s", enabled_sources)
+            
+            # Use polled names for enabled sources
+            self._attr_source_list = []
+            for source_id in enabled_sources:
+                # Use the polled name if available, otherwise fall back to default
+                source_name = self._client.source_names.get(source_id)
+                if not source_name:
+                    source_name = SOURCES.get(source_id, f"Source {source_id}")
+                self._attr_source_list.append(source_name)
+                _LOGGER.info("Added source %s with name: %s", source_id, source_name)
+            
+            _LOGGER.info("Final source list: %s", self._attr_source_list)
         elif self._client.source_names:
             # If no enabled info but we have names, use all sources with names
-            self._attr_source_list = [
-                self._client.source_names.get(source_id, SOURCES.get(source_id, f"Source {source_id}"))
-                for source_id in sorted(SOURCES.keys())
-            ]
+            self._attr_source_list = list(self._client.source_names.values())
             _LOGGER.info("Source list updated with all named sources: %s", self._attr_source_list)
         else:
             # Use default names if polling failed
