@@ -188,48 +188,71 @@ class NADClient:
 
     async def poll_source_names(self, source_count: int = 9) -> dict[str, str]:
         """Poll source names and enabled status from the device."""
+        _LOGGER.info("=" * 60)
         _LOGGER.info("Starting to poll %d sources for names and enabled status", source_count)
+        _LOGGER.info("=" * 60)
         source_names = {}
         source_enabled = {}
         
         for source_num in range(1, source_count + 1):
             source_id = str(source_num)
+            _LOGGER.info("--- Polling Source %s ---", source_num)
             
             # Check if source is enabled
             enabled_query = f"Source{source_num}.Enabled?\r\n"
-            enabled_response = await self.query(enabled_query, timeout=1.0)
+            _LOGGER.info("Sending query: %s", enabled_query.strip())
+            enabled_response = await self.query(enabled_query, timeout=1.5)
+            _LOGGER.info("Raw enabled response: %r", enabled_response)
+            
             is_enabled = False
-            if enabled_response and "=" in enabled_response:
-                try:
-                    # Response format: Source1.Enabled=Yes or No
-                    enabled_value = enabled_response.split("=", 1)[1].strip().lower()
-                    is_enabled = enabled_value in ["yes", "on", "true", "1"]
-                    source_enabled[source_id] = is_enabled
-                    _LOGGER.info("Source %s enabled: %s (response: %s)", source_num, is_enabled, enabled_response)
-                except (ValueError, IndexError):
-                    _LOGGER.warning("Could not parse source enabled from: %s", enabled_response)
+            if enabled_response:
+                if "=" in enabled_response:
+                    try:
+                        # Response format: Source1.Enabled=Yes or No
+                        enabled_value = enabled_response.split("=", 1)[1].strip().lower()
+                        is_enabled = enabled_value in ["yes", "on", "true", "1"]
+                        source_enabled[source_id] = is_enabled
+                        _LOGGER.info("✓ Source %s enabled: %s (parsed from: %s)", source_num, is_enabled, enabled_response)
+                    except (ValueError, IndexError) as e:
+                        _LOGGER.error("✗ Could not parse source enabled from: %s (error: %s)", enabled_response, e)
+                else:
+                    _LOGGER.warning("✗ Response missing '=' separator: %s", enabled_response)
             else:
-                _LOGGER.warning("No response for Source%s.Enabled query", source_num)
+                _LOGGER.warning("✗ No response for Source%s.Enabled query (timeout?)", source_num)
             
             # Only query name if source is enabled
             if is_enabled:
                 name_query = f"Source{source_num}.Name?\r\n"
-                name_response = await self.query(name_query, timeout=1.0)
-                if name_response and "=" in name_response:
-                    try:
-                        # Response format: Source1.Name=Name
-                        name = name_response.split("=", 1)[1].strip()
-                        if name:
-                            source_names[source_id] = name
-                            _LOGGER.info("Source %s name: %s", source_num, name)
-                    except (ValueError, IndexError):
-                        _LOGGER.warning("Could not parse source name from: %s", name_response)
+                _LOGGER.info("Sending query: %s", name_query.strip())
+                name_response = await self.query(name_query, timeout=1.5)
+                _LOGGER.info("Raw name response: %r", name_response)
+                
+                if name_response:
+                    if "=" in name_response:
+                        try:
+                            # Response format: Source1.Name=Name
+                            name = name_response.split("=", 1)[1].strip()
+                            if name:
+                                source_names[source_id] = name
+                                _LOGGER.info("✓ Source %s name: %s", source_num, name)
+                            else:
+                                _LOGGER.warning("✗ Source %s name is empty", source_num)
+                        except (ValueError, IndexError) as e:
+                            _LOGGER.error("✗ Could not parse source name from: %s (error: %s)", name_response, e)
+                    else:
+                        _LOGGER.warning("✗ Response missing '=' separator: %s", name_response)
                 else:
-                    _LOGGER.warning("No response for Source%s.Name query", source_num)
+                    _LOGGER.warning("✗ No response for Source%s.Name query (timeout?)", source_num)
+            else:
+                _LOGGER.info("⊘ Skipping name query for Source %s (not enabled)", source_num)
         
         self.source_names = source_names
         self.source_enabled = source_enabled
-        _LOGGER.info("Source polling complete. Enabled: %s, Names: %s", source_enabled, source_names)
+        _LOGGER.info("=" * 60)
+        _LOGGER.info("Source polling complete!")
+        _LOGGER.info("Enabled sources: %s", source_enabled)
+        _LOGGER.info("Source names: %s", source_names)
+        _LOGGER.info("=" * 60)
         return source_names
 
     async def send_command(self, command: str) -> bool:
