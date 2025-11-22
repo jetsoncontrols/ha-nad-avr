@@ -27,6 +27,10 @@ class NADClient:
         self._should_reconnect = True
         self._lock = asyncio.Lock()
         self._pending_query: Optional[asyncio.Future] = None
+        self.source_names: dict[str, str] = {}
+        self.source_enabled: dict[str, bool] = {}
+        self.firmware_version: Optional[str] = None
+        self.model: Optional[str] = None
 
     @property
     def connected(self) -> bool:
@@ -155,6 +159,72 @@ class NADClient:
             
             if self._should_reconnect:
                 await self.connect()
+
+    async def poll_device_info(self) -> None:
+        """Poll device information (model and firmware version)."""
+        # Poll model number
+        response = await self.query("Main.Model?\r\n", timeout=2.0)
+        if response and "=" in response:
+            try:
+                # Response format: Main.Model=MODEL_NAME
+                model = response.split("=", 1)[1].strip()
+                if model:
+                    self.model = model
+                    _LOGGER.debug("Model: %s", model)
+            except (ValueError, IndexError):
+                _LOGGER.debug("Could not parse model from: %s", response)
+        
+        # Poll firmware version
+        response = await self.query("Main.Version?\r\n", timeout=2.0)
+        if response and "=" in response:
+            try:
+                # Response format: Main.Version=X.X.X
+                version = response.split("=", 1)[1].strip()
+                if version:
+                    self.firmware_version = version
+                    _LOGGER.debug("Firmware version: %s", version)
+            except (ValueError, IndexError):
+                _LOGGER.debug("Could not parse firmware version from: %s", response)
+
+    async def poll_source_names(self, source_count: int = 9) -> dict[str, str]:
+        """Poll source names and enabled status from the device."""
+        source_names = {}
+        source_enabled = {}
+        
+        for source_num in range(1, source_count + 1):
+            source_id = str(source_num)
+            
+            # Check if source is enabled
+            enabled_query = f"Source{source_num}.Enabled?\r\n"
+            enabled_response = await self.query(enabled_query, timeout=1.0)
+            is_enabled = False
+            if enabled_response and "=" in enabled_response:
+                try:
+                    # Response format: Source1.Enabled=Yes or No
+                    enabled_value = enabled_response.split("=", 1)[1].strip().lower()
+                    is_enabled = enabled_value in ["yes", "on", "true", "1"]
+                    source_enabled[source_id] = is_enabled
+                    _LOGGER.debug("Source %s enabled: %s", source_num, is_enabled)
+                except (ValueError, IndexError):
+                    _LOGGER.debug("Could not parse source enabled from: %s", enabled_response)
+            
+            # Only query name if source is enabled
+            if is_enabled:
+                name_query = f"Source{source_num}.Name?\r\n"
+                name_response = await self.query(name_query, timeout=1.0)
+                if name_response and "=" in name_response:
+                    try:
+                        # Response format: Source1.Name=Name
+                        name = name_response.split("=", 1)[1].strip()
+                        if name:
+                            source_names[source_id] = name
+                            _LOGGER.debug("Source %s name: %s", source_num, name)
+                    except (ValueError, IndexError):
+                        _LOGGER.debug("Could not parse source name from: %s", name_response)
+        
+        self.source_names = source_names
+        self.source_enabled = source_enabled
+        return source_names
 
     async def send_command(self, command: str) -> bool:
         """Send a command to the NAD AVR."""

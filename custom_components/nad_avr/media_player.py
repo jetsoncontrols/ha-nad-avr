@@ -67,13 +67,8 @@ class NADAVRMediaPlayer(MediaPlayerEntity):
         """Initialize the NAD AVR media player."""
         self._client = client
         self._host = host
-        self._attr_device_info = {
-            "identifiers": {(DOMAIN, entry_id)},
-            "name": name,
-            "manufacturer": "NAD",
-            "model": "AVR",
-            "configuration_url": f"http://{host}/osd/",
-        }
+        self._entry_id = entry_id
+        self._device_name = name
         self._attr_unique_id = f"{entry_id}_media_player"
         self._attr_available = False
         self._attr_state = MediaPlayerState.OFF
@@ -86,12 +81,58 @@ class NADAVRMediaPlayer(MediaPlayerEntity):
         client._status_callback = self._connection_status_changed
         client._update_callback = self._handle_update
 
+    @property
+    def device_info(self) -> dict[str, Any]:
+        """Return device information."""
+        info = {
+            "identifiers": {(DOMAIN, self._entry_id)},
+            "name": self._device_name,
+            "manufacturer": "NAD",
+            "model": self._client.model or "AVR",
+            "configuration_url": f"http://{self._host}/osd/",
+        }
+        
+        # Add firmware version if available
+        if self._client.firmware_version:
+            info["sw_version"] = self._client.firmware_version
+        
+        return info
+
     async def _connection_status_changed(self, connected: bool) -> None:
         """Handle connection status changes."""
         self._attr_available = connected
         if not connected:
             self._attr_state = MediaPlayerState.OFF
+        else:
+            # Poll device info (model and firmware version)
+            await self._client.poll_device_info()
+            
+            # Poll source names from the device
+            await self._client.poll_source_names()
+            self._update_source_list()
+            
+            # Poll initial state (power, volume, mute, source)
+            await self.async_update()
         self.async_write_ha_state()
+
+    def _update_source_list(self) -> None:
+        """Update the source list with polled names, filtering out disabled sources."""
+        if self._client.source_enabled:
+            # Only include sources that are enabled
+            self._attr_source_list = [
+                self._client.source_names.get(source_id, SOURCES.get(source_id, f"Source {source_id}"))
+                for source_id in sorted(SOURCES.keys())
+                if self._client.source_enabled.get(source_id, False)
+            ]
+        elif self._client.source_names:
+            # If no enabled info but we have names, use all sources with names
+            self._attr_source_list = [
+                self._client.source_names.get(source_id, SOURCES.get(source_id, f"Source {source_id}"))
+                for source_id in sorted(SOURCES.keys())
+            ]
+        else:
+            # Use default names if polling failed
+            self._attr_source_list = list(SOURCES.values())
 
     async def _handle_update(self, message: str) -> None:
         """Handle unsolicited updates from the device."""
@@ -124,7 +165,10 @@ class NADAVRMediaPlayer(MediaPlayerEntity):
             
             # Handle source updates
             elif key == "Main.Source":
-                self._attr_source = SOURCES.get(value, value)
+                # Use polled name if available, otherwise use default
+                self._attr_source = self._client.source_names.get(
+                    value, SOURCES.get(value, value)
+                )
             
             # Update the state in Home Assistant
             self.async_write_ha_state()
@@ -171,7 +215,10 @@ class NADAVRMediaPlayer(MediaPlayerEntity):
             response = await self._client.query(CMD_SOURCE_QUERY)
             if response and "=" in response:
                 source_id = response.split("=", 1)[1].strip()
-                self._attr_source = SOURCES.get(source_id, source_id)
+                # Use polled name if available, otherwise use default
+                self._attr_source = self._client.source_names.get(
+                    source_id, SOURCES.get(source_id, source_id)
+                )
 
     async def async_turn_on(self) -> None:
         """Turn the media player on."""
@@ -212,7 +259,19 @@ class NADAVRMediaPlayer(MediaPlayerEntity):
 
     async def async_select_source(self, source: str) -> None:
         """Select input source."""
-        source_id = SOURCE_NAMES.get(source)
+        # Find source ID by matching against polled names or defaults
+        source_id = None
+        
+        # Check polled names first
+        for sid, name in self._client.source_names.items():
+            if name == source:
+                source_id = sid
+                break
+        
+        # Fall back to default names
+        if not source_id:
+            source_id = SOURCE_NAMES.get(source)
+        
         if source_id:
             await self._client.send_command(CMD_SOURCE_SET.format(source_id))
             self._attr_source = source
