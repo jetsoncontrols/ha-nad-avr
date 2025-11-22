@@ -3,7 +3,7 @@
 DOMAIN = "nad_avr"
 
 # Defaults
-DEFAULT_PORT = 50001
+DEFAULT_PORT = 23
 DEFAULT_NAME = "NAD AVR"
 
 # Update interval
