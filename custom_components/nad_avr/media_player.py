@@ -44,8 +44,9 @@ async def async_setup_entry(
     """Set up the NAD AVR media player."""
     client = hass.data[DOMAIN][config_entry.entry_id]
     name = config_entry.data.get(CONF_NAME, f"NAD AVR {config_entry.data[CONF_HOST]}")
+    host = config_entry.data[CONF_HOST]
     
-    async_add_entities([NADAVRMediaPlayer(client, name, config_entry.entry_id)], True)
+    async_add_entities([NADAVRMediaPlayer(client, name, host, config_entry.entry_id)], True)
 
 
 class NADAVRMediaPlayer(MediaPlayerEntity):
@@ -62,14 +63,16 @@ class NADAVRMediaPlayer(MediaPlayerEntity):
         | MediaPlayerEntityFeature.SELECT_SOURCE
     )
 
-    def __init__(self, client: NADClient, name: str, entry_id: str) -> None:
+    def __init__(self, client: NADClient, name: str, host: str, entry_id: str) -> None:
         """Initialize the NAD AVR media player."""
         self._client = client
+        self._host = host
         self._attr_device_info = {
             "identifiers": {(DOMAIN, entry_id)},
             "name": name,
             "manufacturer": "NAD",
             "model": "AVR",
+            "configuration_url": f"http://{host}/osd/",
         }
         self._attr_unique_id = f"{entry_id}_media_player"
         self._attr_available = False
