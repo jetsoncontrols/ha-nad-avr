@@ -25,6 +25,7 @@ class NADClient:
         self._read_task: Optional[asyncio.Task] = None
         self._should_reconnect = True
         self._lock = asyncio.Lock()
+        self._pending_query: Optional[asyncio.Future] = None
 
     @property
     def connected(self) -> bool:
@@ -104,6 +105,11 @@ class NADClient:
                     if response:
                         _LOGGER.debug("Received from NAD: %s", response)
                         
+                        # If there's a pending query, resolve it with this response
+                        if self._pending_query and not self._pending_query.done():
+                            self._pending_query.set_result(response)
+                            self._pending_query = None
+                        
                 except asyncio.TimeoutError:
                     # No data received, continue
                     continue
@@ -120,6 +126,11 @@ class NADClient:
         if self._connected:
             _LOGGER.warning("Connection to NAD AVR lost")
             self._connected = False
+            
+            # Cancel any pending queries
+            if self._pending_query and not self._pending_query.done():
+                self._pending_query.cancel()
+            self._pending_query = None
             
             if self._status_callback:
                 await self._status_callback(False)
@@ -161,27 +172,43 @@ class NADClient:
                 _LOGGER.warning("Cannot query, not connected")
                 return None
             
+            # Cancel any existing pending query
+            if self._pending_query and not self._pending_query.done():
+                self._pending_query.cancel()
+            
             try:
                 _LOGGER.debug("Querying NAD: %s", command.strip())
+                
+                # Create a future to wait for the response
+                self._pending_query = asyncio.get_event_loop().create_future()
+                
+                # Send the command
                 self._writer.write(command.encode('utf-8'))
                 await self._writer.drain()
                 
-                # Wait for response
-                data = await asyncio.wait_for(
-                    self._reader.readline(),
+                # Wait for the background reader to populate the future
+                response = await asyncio.wait_for(
+                    self._pending_query,
                     timeout=timeout
                 )
                 
-                if data:
-                    response = data.decode('utf-8', errors='ignore').strip()
-                    _LOGGER.debug("Query response: %s", response)
-                    return response
+                _LOGGER.debug("Query response: %s", response)
+                return response
                 
-                return None
             except asyncio.TimeoutError:
                 _LOGGER.warning("Query timeout: %s", command.strip())
+                if self._pending_query and not self._pending_query.done():
+                    self._pending_query.cancel()
+                self._pending_query = None
+                return None
+            except asyncio.CancelledError:
+                _LOGGER.debug("Query cancelled: %s", command.strip())
+                self._pending_query = None
                 return None
             except (OSError, ConnectionResetError) as err:
                 _LOGGER.error("Error during query: %s", err)
+                if self._pending_query and not self._pending_query.done():
+                    self._pending_query.cancel()
+                self._pending_query = None
                 await self._handle_disconnect()
                 return None
