@@ -11,7 +11,7 @@ SCAN_INTERVAL = 30
 
 # NAD Commands
 CMD_POWER_ON = "Main.Power=On\r\n"
-CMD_POWER_OFF = "Main.Power=Standby\r\n"
+CMD_POWER_OFF = "Main.Power=Off\r\n"
 CMD_POWER_QUERY = "Main.Power?\r\n"
 CMD_VOLUME_UP = "Main.Volume+\r\n"
 CMD_VOLUME_DOWN = "Main.Volume-\r\n"
@@ -25,14 +25,15 @@ CMD_SOURCE_SET = "Main.Source={}\r\n"
 
 # NAD Sources - Common inputs for NAD AVRs
 SOURCES = {
-    "1": "CD",
-    "2": "Tuner",
-    "3": "Video 1",
-    "4": "Video 2",
-    "5": "Disc",
-    "6": "Tape 1",
-    "7": "Aux",
-    "8": "TV",
+    "1": "Source 1",
+    "2": "Source 2",
+    "3": "Source 3",
+    "4": "Source 4",
+    "5": "Source 5",
+    "6": "Source 6",
+    "7": "Source 7",
+    "8": "Source 8",
+    "9": "Source 9",
 }
 
 # Reverse mapping
