@@ -10,18 +10,18 @@ DEFAULT_NAME = "NAD AVR"
 SCAN_INTERVAL = 30
 
 # NAD Commands
-CMD_POWER_ON = "Main.Power=On\r"
-CMD_POWER_OFF = "Main.Power=Standby\r"
-CMD_POWER_QUERY = "Main.Power?\r"
-CMD_VOLUME_UP = "Main.Volume+\r"
-CMD_VOLUME_DOWN = "Main.Volume-\r"
-CMD_VOLUME_QUERY = "Main.Volume?\r"
-CMD_VOLUME_SET = "Main.Volume={}\r"
-CMD_MUTE_ON = "Main.Mute=On\r"
-CMD_MUTE_OFF = "Main.Mute=Off\r"
-CMD_MUTE_QUERY = "Main.Mute?\r"
-CMD_SOURCE_QUERY = "Main.Source?\r"
-CMD_SOURCE_SET = "Main.Source={}\r"
+CMD_POWER_ON = "Main.Power=On\r\n"
+CMD_POWER_OFF = "Main.Power=Standby\r\n"
+CMD_POWER_QUERY = "Main.Power?\r\n"
+CMD_VOLUME_UP = "Main.Volume+\r\n"
+CMD_VOLUME_DOWN = "Main.Volume-\r\n"
+CMD_VOLUME_QUERY = "Main.Volume?\r\n"
+CMD_VOLUME_SET = "Main.Volume={}\r\n"
+CMD_MUTE_ON = "Main.Mute=On\r\n"
+CMD_MUTE_OFF = "Main.Mute=Off\r\n"
+CMD_MUTE_QUERY = "Main.Mute?\r\n"
+CMD_SOURCE_QUERY = "Main.Source?\r\n"
+CMD_SOURCE_SET = "Main.Source={}\r\n"
 
 # NAD Sources - Common inputs for NAD AVRs
 SOURCES = {

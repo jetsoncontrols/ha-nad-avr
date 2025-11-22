@@ -94,7 +94,7 @@ class NADClient:
             while self._connected and self._reader:
                 try:
                     data = await asyncio.wait_for(
-                        self._reader.readline(),
+                        self._reader.readuntil(b'\n'),
                         timeout=READ_TIMEOUT
                     )
                     if not data:
