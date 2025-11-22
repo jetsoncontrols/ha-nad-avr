@@ -28,6 +28,8 @@ from .const import (
     CMD_SOURCE_SET,
     SOURCES,
     SOURCE_NAMES,
+    VOLUME_MIN_DB,
+    VOLUME_RANGE_DB,
 )
 from .nad_client import NADClient
 
@@ -110,10 +112,9 @@ class NADAVRMediaPlayer(MediaPlayerEntity):
             response = await self._client.query(CMD_VOLUME_QUERY)
             if response and "=" in response:
                 try:
-                    # NAD volume is typically -90 to 0 dB
                     volume_db = int(response.split("=", 1)[1].strip())
-                    # Convert to 0.0-1.0 range (assuming -90 to 0 dB range)
-                    self._attr_volume_level = max(0.0, min(1.0, (volume_db + 90) / 90))
+                    # Convert to 0.0-1.0 range
+                    self._attr_volume_level = max(0.0, min(1.0, (volume_db - VOLUME_MIN_DB) / VOLUME_RANGE_DB))
                 except (ValueError, IndexError):
                     pass
             
@@ -152,8 +153,8 @@ class NADAVRMediaPlayer(MediaPlayerEntity):
 
     async def async_set_volume_level(self, volume: float) -> None:
         """Set volume level, range 0..1."""
-        # Convert 0.0-1.0 to -90 to 0 dB
-        volume_db = int((volume * 90) - 90)
+        # Convert 0.0-1.0 to NAD dB range
+        volume_db = int((volume * VOLUME_RANGE_DB) + VOLUME_MIN_DB)
         await self._client.send_command(CMD_VOLUME_SET.format(volume_db))
         self._attr_volume_level = volume
         self.async_write_ha_state()

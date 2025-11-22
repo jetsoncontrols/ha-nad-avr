@@ -2,10 +2,6 @@
 
 DOMAIN = "nad_avr"
 
-# Configuration
-CONF_HOST = "host"
-CONF_PORT = "port"
-
 # Defaults
 DEFAULT_PORT = 50001
 DEFAULT_NAME = "NAD AVR"
@@ -41,3 +37,8 @@ SOURCES = {
 
 # Reverse mapping
 SOURCE_NAMES = {v: k for k, v in SOURCES.items()}
+
+# Volume range (NAD uses -90 to 0 dB)
+VOLUME_MIN_DB = -90
+VOLUME_MAX_DB = 0
+VOLUME_RANGE_DB = VOLUME_MAX_DB - VOLUME_MIN_DB  # 90
