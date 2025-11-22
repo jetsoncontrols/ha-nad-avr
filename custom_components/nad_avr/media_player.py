@@ -82,8 +82,9 @@ class NADAVRMediaPlayer(MediaPlayerEntity):
         self._attr_source = None
         self._attr_source_list = list(SOURCES.values())
         
-        # Set up status callback
+        # Set up callbacks
         client._status_callback = self._connection_status_changed
+        client._update_callback = self._handle_update
 
     async def _connection_status_changed(self, connected: bool) -> None:
         """Handle connection status changes."""
@@ -91,6 +92,45 @@ class NADAVRMediaPlayer(MediaPlayerEntity):
         if not connected:
             self._attr_state = MediaPlayerState.OFF
         self.async_write_ha_state()
+
+    async def _handle_update(self, message: str) -> None:
+        """Handle unsolicited updates from the device."""
+        if not message or "=" not in message:
+            return
+        
+        try:
+            key, value = message.split("=", 1)
+            key = key.strip()
+            value = value.strip()
+            
+            # Handle power state updates
+            if key == "Main.Power":
+                if value.lower() == "on":
+                    self._attr_state = MediaPlayerState.ON
+                else:
+                    self._attr_state = MediaPlayerState.OFF
+            
+            # Handle volume updates
+            elif key == "Main.Volume":
+                try:
+                    volume_db = int(value)
+                    self._attr_volume_level = max(0.0, min(1.0, (volume_db - VOLUME_MIN_DB) / VOLUME_RANGE_DB))
+                except ValueError:
+                    pass
+            
+            # Handle mute updates
+            elif key == "Main.Mute":
+                self._attr_is_volume_muted = value.lower() == "on"
+            
+            # Handle source updates
+            elif key == "Main.Source":
+                self._attr_source = SOURCES.get(value, value)
+            
+            # Update the state in Home Assistant
+            self.async_write_ha_state()
+            
+        except Exception as err:
+            _LOGGER.debug("Error parsing update message '%s': %s", message, err)
 
     async def async_update(self) -> None:
         """Update the state of the media player."""

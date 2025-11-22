@@ -18,6 +18,7 @@ class NADClient:
         self.host = host
         self.port = port
         self._status_callback = status_callback
+        self._update_callback: Optional[Callable] = None
         self._reader: Optional[asyncio.StreamReader] = None
         self._writer: Optional[asyncio.StreamWriter] = None
         self._connected = False
@@ -109,6 +110,13 @@ class NADClient:
                         if self._pending_query and not self._pending_query.done():
                             self._pending_query.set_result(response)
                             self._pending_query = None
+                        else:
+                            # This is an unsolicited update from the device
+                            if self._update_callback:
+                                try:
+                                    await self._update_callback(response)
+                                except Exception as err:
+                                    _LOGGER.error("Error in update callback: %s", err)
                         
                 except asyncio.TimeoutError:
                     # No data received, continue
