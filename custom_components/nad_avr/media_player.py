@@ -11,7 +11,6 @@ from homeassistant.components.media_player import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, CONF_NAME
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
@@ -85,12 +84,6 @@ class NADAVRMediaPlayer(MediaPlayerEntity):
         client.status_callback = self._connection_status_changed
         client.update_callback = self._handle_update
 
-    async def async_added_to_hass(self) -> None:
-        """Handle entity being added to Home Assistant."""
-        await super().async_added_to_hass()
-        # Now that the entity is added and callbacks are set up, connect to the device
-        await self._client.connect()
-
     @property
     def device_info(self) -> dict[str, Any]:
         """Return device information."""
@@ -118,19 +111,10 @@ class NADAVRMediaPlayer(MediaPlayerEntity):
             # Poll device info (model and firmware version)
             await self._client.poll_device_info()
 
-            # Update device registry with polled info
-            device_reg = dr.async_get(self.hass)
-            device = device_reg.async_get_device(identifiers={(DOMAIN, self._entry_id)})
-            if device:
-                device_reg.async_update_device(
-                    device.id,
-                    model=self._client.model,
-                    sw_version=self._client.firmware_version,
-                )
-
             # Poll source names from the device
             await self._client.poll_source_names()
             self._update_source_list()
+            _LOGGER.info("Source list after polling: %s", self._attr_source_list)
 
             # Write state after updating source list
             self.async_write_ha_state()
@@ -140,6 +124,12 @@ class NADAVRMediaPlayer(MediaPlayerEntity):
 
     def _update_source_list(self) -> None:
         """Update the source list with polled names, filtering out disabled sources."""
+        _LOGGER.info(
+            "Updating source list. Enabled: %s, Names: %s",
+            self._client.source_enabled,
+            self._client.source_names,
+        )
+
         if self._client.source_enabled:
             # Only include sources that are enabled
             enabled_sources = [
@@ -147,6 +137,7 @@ class NADAVRMediaPlayer(MediaPlayerEntity):
                 for source_id in sorted(self._client.source_enabled.keys())
                 if self._client.source_enabled.get(source_id, False)
             ]
+            _LOGGER.info("Enabled source IDs: %s", enabled_sources)
 
             # Use polled names for enabled sources
             self._attr_source_list = []
@@ -156,12 +147,21 @@ class NADAVRMediaPlayer(MediaPlayerEntity):
                 if not source_name:
                     source_name = SOURCES.get(source_id, f"Source {source_id}")
                 self._attr_source_list.append(source_name)
+                _LOGGER.info("Added source %s with name: %s", source_id, source_name)
+
+            _LOGGER.info("Final source list: %s", self._attr_source_list)
         elif self._client.source_names:
             # If no enabled info but we have names, use all sources with names
             self._attr_source_list = list(self._client.source_names.values())
+            _LOGGER.info(
+                "Source list updated with all named sources: %s", self._attr_source_list
+            )
         else:
             # Use default names if polling failed
             self._attr_source_list = list(SOURCES.values())
+            _LOGGER.info(
+                "Source list updated with defaults: %s", self._attr_source_list
+            )
 
     async def _handle_update(self, message: str) -> None:
         """Handle unsolicited updates from the device."""
@@ -208,6 +208,11 @@ class NADAVRMediaPlayer(MediaPlayerEntity):
                     source_num = key.replace("Source", "").replace(".Enabled", "")
                     is_enabled = value.lower() in ["yes", "on", "true", "1"]
                     self._client.source_enabled[source_num] = is_enabled
+                    _LOGGER.info(
+                        "Source %s enabled status updated to: %s",
+                        source_num,
+                        is_enabled,
+                    )
                     # Update the source list when enabled status changes
                     self._update_source_list()
                 except (ValueError, IndexError):
@@ -222,6 +227,7 @@ class NADAVRMediaPlayer(MediaPlayerEntity):
                     source_num = key.replace("Source", "").replace(".Name", "")
                     if value:
                         self._client.source_names[source_num] = value
+                        _LOGGER.info("Source %s name updated to: %s", source_num, value)
                         # Update the source list when name changes
                         self._update_source_list()
                 except (ValueError, IndexError):
