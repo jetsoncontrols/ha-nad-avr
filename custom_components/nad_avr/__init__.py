@@ -19,7 +19,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     host = entry.data[CONF_HOST]
     port = entry.data[CONF_PORT]
 
-    # Create client (don't connect yet - wait for callbacks to be set up)
+    # Create client
     client = NADClient(host, port)
 
     # Store client in hass.data
@@ -27,10 +27,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data[DOMAIN][entry.entry_id] = client
 
     # Forward the setup to the media_player platform
-    # The media_player entity will set up callbacks and then connect
+    # The media_player entity will set up callbacks
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
-    return True
+    # Connect to the device
+    return await client.connect()
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
